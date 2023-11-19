@@ -35,7 +35,7 @@ class DouYinCrawler(AbstractCrawler):
         self.login_type = login_type
         self.account_pool = account_pool
 
-    async def start(self) -> None:
+    async def start(self, keywords) -> list:
         account_phone, playwright_proxy, httpx_proxy = self.create_proxy_info()
         async with async_playwright() as playwright:
             # Launch a browser context.
@@ -64,11 +64,12 @@ class DouYinCrawler(AbstractCrawler):
                 await self.dy_client.update_cookies(browser_context=self.browser_context)
 
             # search_posts
-            await self.search()
+            await self.search(keywords)
 
             utils.logger.info("Douyin Crawler finished ...")
+            return []
 
-    async def search(self) -> None:
+    async def search(self, keywords) -> list:
         utils.logger.info("Begin search douyin keywords")
         for keyword in config.KEYWORDS.split(","):
             request_keyword_var.set(keyword)
@@ -94,6 +95,7 @@ class DouYinCrawler(AbstractCrawler):
                     await douyin.update_douyin_aweme(aweme_item=aweme_info)
             utils.logger.info(f"keyword:{keyword}, aweme_list:{aweme_list}")
             await self.batch_get_note_comments(aweme_list)
+            return []
 
     async def batch_get_note_comments(self, aweme_list: List[str]) -> None:
         task_list: List[Task] = []

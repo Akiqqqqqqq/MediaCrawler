@@ -61,18 +61,19 @@ class XHSNoteComment(XhsBaseModel):
         return f"{self.comment_id} - {self.content}"
 
 
-async def update_xhs_note(note_item: Dict):
+async def update_xhs_note(note_item: Dict, keyword: str) -> Dict:
     note_id = note_item.get("note_id")
     user_info = note_item.get("user", {})
     interact_info = note_item.get("interact_info", {})
     image_list: List[Dict] = note_item.get("image_list", [])
 
     local_db_item = {
+        "keyword": keyword,
         "note_id": note_item.get("note_id"),
         "type": note_item.get("type"),
         "title": note_item.get("title") or note_item.get("desc", "")[:255],
         "desc": note_item.get("desc", ""),
-        "time": note_item.get("time"),
+        "time": note_item.get("time"),   # 发帖时间
         "last_update_time": note_item.get("last_update_time", 0),
         "user_id": user_info.get("user_id"),
         "nickname": user_info.get("nickname"),
@@ -86,7 +87,8 @@ async def update_xhs_note(note_item: Dict):
         "last_modify_ts": utils.get_current_timestamp(),
         "note_url": f"https://www.xiaohongshu.com/explore/{note_id}"
     }
-    print("xhs note:", local_db_item)
+    # print("xhs note:", local_db_item)
+    print(f'keyword: {keyword}, title: {local_db_item.get("title")}, liked_count: {local_db_item.get("liked_count")}')
     if config.IS_SAVED_DATABASED:
         if not await XHSNote.filter(note_id=note_id).first():
             local_db_item["add_ts"] = utils.get_current_timestamp()
@@ -99,15 +101,16 @@ async def update_xhs_note(note_item: Dict):
             note_data = note_pydantic(**local_db_item)
             note_pydantic.validate(note_data)
             await XHSNote.filter(note_id=note_id).update(**note_data.dict())
-    else:
-        # Below is a simple way to save it in CSV format.
-        source_keywords = request_keyword_var.get()
-        pathlib.Path(f"data/xhs").mkdir(parents=True, exist_ok=True)
-        with open(f"data/xhs/notes_{source_keywords}.csv", mode='a+', encoding="utf-8-sig", newline="") as f:
-            writer = csv.writer(f)
-            if f.tell() == 0:
-                writer.writerow(local_db_item.keys())
-            writer.writerow(local_db_item.values())
+    # else:
+    #     # Below is a simple way to save it in CSV format.
+    #     source_keywords = request_keyword_var.get()
+    #     pathlib.Path(f"data/xhs").mkdir(parents=True, exist_ok=True)
+    #     with open(f"data/xhs/notes_{source_keywords}.csv", mode='a+', encoding="utf-8-sig", newline="") as f:
+    #         writer = csv.writer(f)
+    #         if f.tell() == 0:
+    #             writer.writerow(local_db_item.keys())
+    #         writer.writerow(local_db_item.values())
+    return local_db_item
 
 
 async def update_xhs_note_comment(note_id: str, comment_item: Dict):
