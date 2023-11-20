@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import json
 import logging
@@ -25,8 +26,10 @@ MAX_LIMIT = 16384
 GPT_3 = 'gpt-3.5-turbo'
 GPT_4 = 'gpt-4-1106-preview'
 MODEL=GPT_4
+NEWS_FEED_PATH = '/api/v1/newsfeed'
 
-bot_url='http://127.0.0.1:8010/api/v1/newsfeed'
+run_at = '05:00'
+bot_url='http://127.0.0.1:8010'
 db_inited = False
 logger = logging.getLogger(__name__)
 
@@ -44,18 +47,6 @@ EXTRACT_TOPIC_PROMPT = '''
 请记住，关键字keyword不要超过3个。关键字之间用空格分开, 不要使用逗号作为分隔符。同时keywords的类型是str。如果分析发现用户没有感兴趣话题，请返回空json: {{}}
 '''
 
-def get_completion(prompt: str, return_json=False) -> str:
-    order = [{"role": "user", "content": prompt}]
-    response = OpenAI(api_key=os.environ['OPENAI_API_KEY']).chat.completions.create(
-        model=MODEL,
-        response_format={ "type": "json_object" } if return_json else None,
-        messages=order,
-    )
-    content = response.choices[0].message.content
-    if return_json:
-        content = content.lstrip("```json").rstrip("```") # GPT4-preview return extra characters
-    return content
-
 class CrawlerFactory:
     @staticmethod
     def create_crawler(platform: str):
@@ -68,10 +59,14 @@ class CrawlerFactory:
 
 async def crawl(platform: str, login_type: str):
     start_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    logger.info(f'begin today\'s crawling {start_time}')
+    logger.info(f'begin today\'s crawling , starttime:{start_time}')
 
     # 1. query new memories produced in 1 day from milvus
-    recs = query_milvus()
+    try:
+        recs = query_milvus()
+    except Exception:
+        logger.error(f"milvus: retry to max limit, abandoned : {e}")
+        return
     
     # 2. group memories into <user_id, [m1, m2, ...]>
     grouped_user = defaultdict(list)
@@ -89,6 +84,9 @@ async def crawl(platform: str, login_type: str):
     
     # 3. ask LLM to extract a <topic, keywords> from users' memories, and return <keywords, [u1, u2, ...]>
     _ , grouped_key = query_llm(grouped_user)
+    if len(grouped_key) == 0:
+        logger.warning('LLM returns nothing')
+        return
 
     # 4. begin to crawl xhs
     # init account pool
@@ -150,10 +148,11 @@ async def crawl(platform: str, login_type: str):
         logger.info(f'user:{u}, best notes: {title}, liked_count: {liked_count}')
 
     # 6. to noiz bot
-    send_data_to_api(data_dict=best_note)
+    logger.info(f'{len(best_result)} notes to send')
+    send_data_to_api(best_result)
     
     end_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    logger.info(f'begin today\'s crawling {end_time}')
+    logger.info(f'finish today\'s crawling ,endtime:{end_time}')
 
 
 @retry(stop=stop_after_attempt(10), 
@@ -174,7 +173,7 @@ def send_data_to_api(data_dict):
         'count': len(items)
     }
 
-    response = requests.post(bot_url, json=payload)
+    response = requests.post(bot_url + NEWS_FEED_PATH, json=payload)
     if response.status_code == 200:
         print("send successfully")
     else:
@@ -194,15 +193,15 @@ def before_retry(retry_state):
         clean_browser_data()
 
 # 在第3次重试后，等待时间达到3600秒
-@retry(stop=stop_after_attempt(4), 
+@retry(stop=stop_after_attempt(6), 
        wait=wait_exponential(multiplier=900, max=3600),
        before=before_retry,
        after=lambda retry_state: print(f"failed to crawl on {retry_state.attempt_number} times, error: {retry_state.outcome.exception()}" if retry_state.outcome.failed else "crawled successfully!"))
 async def start_crawler(crawler: XiaoHongShuCrawler, keywords):
     return await crawler.start(keywords)
 
-@retry(stop=stop_after_attempt(5), 
-       wait=wait_exponential(multiplier=1, max=60),
+@retry(stop=stop_after_attempt(10), 
+       wait=wait_exponential(multiplier=10, max=120),
        before=lambda retry_state: print(f"try query milvus on {retry_state.attempt_number} times..."),
        after=lambda retry_state: print(f"failed to query milvus on {retry_state.attempt_number} times, error: {retry_state.outcome.exception()}" if retry_state.outcome.failed else "query milvus successfully!"))
 def query_milvus():
@@ -212,10 +211,7 @@ def query_milvus():
     vcdb = VCDB()
     return vcdb.query(expr=f"time > '{formatted_time}'", limit=MAX_LIMIT, ouput_fields=['user_id', 'content_str', 'time'])
 
-@retry(stop=stop_after_attempt(5), 
-       wait=wait_exponential(multiplier=1, max=60),
-       before=lambda retry_state: print(f"try query LLM on {retry_state.attempt_number} times..."),
-       after=lambda retry_state: print(f"failed to query LLM on {retry_state.attempt_number} times, error: {retry_state.outcome.exception()}" if retry_state.outcome.failed else "query LLM successfully!"))
+
 def query_llm(grouped_user:dict):
     user_topic = {}
     grouped_key = defaultdict(list)
@@ -238,6 +234,24 @@ def query_llm(grouped_user:dict):
         k = topic_data['keywords']
         print(f'user:{u}, topic:{t}, keywords:{k}')
     return user_topic, grouped_key
+
+
+@retry(stop=stop_after_attempt(5),
+       wait=wait_exponential(multiplier=5, max=60),
+       before=lambda retry_state: print(f"try query LLM on {retry_state.attempt_number} times..."),
+       after=lambda retry_state: print(f"failed to query LLM on {retry_state.attempt_number} times, error: {retry_state.outcome.exception()}" if retry_state.outcome.failed else "query LLM successfully!"))
+def get_completion(prompt: str, return_json=False) -> str:
+    order = [{"role": "user", "content": prompt}]
+    response = OpenAI(api_key=os.environ['OPENAI_API_KEY']).chat.completions.create(
+        model=MODEL,
+        response_format={"type": "json_object"} if return_json else None,
+        messages=order,
+    )
+    content = response.choices[0].message.content
+    if return_json:
+        content = content.lstrip("```json").rstrip(
+            "```")  # GPT4-preview return extra characters
+    return content
 
 # if __name__ == '__main__':
 #     try:
@@ -273,7 +287,24 @@ def run_main_task():
     loop.run_until_complete(crawl(PLATFORM, LOGIN_TYPE))
 
 if __name__ == '__main__':
-    schedule.every().day.at("04:00").do(run_main_task)
+    logger.info('Starting cron service...')
+
+    parser = argparse.ArgumentParser(description='Run scheduled tasks.')
+
+    parser.add_argument('-r', '--run_at', type=str,
+                        default='05:00', help='Start time in HH:MM format')
+    parser.add_argument('-u', '--bot_url', type=str,
+                        default='http://127.0.0.1:8010', help='URL of the bot')
+    parser.add_argument('-d', '--db_inited', action='store_true',
+                        help='Flag to indicate if DB is initialized')
+
+    args = parser.parse_args()
+    run_at = args.run_at
+    bot_url = args.bot_url
+    db_inited = args.db_inited
+
+    logger.info(f"Run at: {run_at}, Bot URL: {bot_url}, DB Initialized: {db_inited}")
+    schedule.every().day.at(run_at).do(run_main_task)
     # schedule.every().minute.at(":00").do(run_main_task)
     while True:
         schedule.run_pending()
