@@ -1,9 +1,15 @@
+import asyncio
 import base64
+import functools
 import logging
 import os
 import random
 import re
+import smtplib
 import time
+from email.mime.image import MIMEImage
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -13,6 +19,11 @@ import httpx
 import numpy as np
 from PIL import Image, ImageDraw
 from playwright.async_api import Cookie, Page
+
+from_email = 'vincentqqqqqqq@163.com'
+password = "RRPGXEXAYPUJZXMW"
+to_email = 'vincetqqqqqqq@163.com'
+smtp_server = "smtp.163.com"
 
 
 async def find_login_qrcode(page: Page, selector: str) -> str:
@@ -41,7 +52,38 @@ def show_qrcode(qr_code) -> None: # type: ignore
     new_image.paste(image, (10, 10))
     draw = ImageDraw.Draw(new_image)
     draw.rectangle((0, 0, width + 19, height + 19), outline=(0, 0, 0), width=1)
-    new_image.show()
+    # new_image.show()
+
+    # Save image to a BytesIO object
+    img_bytes = BytesIO()
+    new_image.save(img_bytes, format='PNG')
+    img_bytes.seek(0)
+
+    # Send image via email
+    send_email_with_image(img_bytes)
+
+def send_email_with_image(image_bytes):
+    """Send email with the image as attachment"""
+    msg = MIMEMultipart()
+    msg['From'] = from_email
+    msg['To'] = to_email
+    msg['Subject'] = 'QR Code'
+
+    # Attach the image
+    img = MIMEImage(image_bytes.read())
+    img.add_header('Content-Disposition', 'attachment', filename='qrcode.png')
+    msg.attach(img)
+
+    # Connect to the SMTP server and send the email
+    try:
+        with smtplib.SMTP(smtp_server, 25) as server:
+            server.starttls()
+            server.login(from_email, password)
+            server.send_message(msg)
+    except Exception as e:
+        print(f"email send failed, error: {e}")
+
+    print('Email sent!')
 
 
 def get_user_agent() -> str:

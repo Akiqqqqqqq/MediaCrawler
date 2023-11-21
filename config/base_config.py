@@ -1,6 +1,6 @@
 # Desc: base config
 PLATFORM = "xhs"
-KEYWORDS = "python,golang"
+KEYWORDS = "盐田酒店"
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""  # login by cookie, if login_type is cookie, you must set this value
 
@@ -20,7 +20,7 @@ SAVE_LOGIN_STATE = True
 USER_DATA_DIR = "%s_user_data_dir"  # %s will be replaced by platform name
 
 # crawler max notes count
-CRAWLER_MAX_NOTES_COUNT = 20
+CRAWLER_MAX_NOTES_COUNT = 10
 
 # max concurrency num
-MAX_CONCURRENCY_NUM = 10
+MAX_CONCURRENCY_NUM = 2

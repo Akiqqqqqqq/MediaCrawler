@@ -9,11 +9,11 @@ class AbstractCrawler(ABC):
         pass
 
     @abstractmethod
-    async def start(self):
+    async def start(self, keywords):
         pass
 
     @abstractmethod
-    async def search(self):
+    async def search(self, keywords) -> list:
         pass
 
 

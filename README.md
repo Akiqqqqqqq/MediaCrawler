@@ -51,7 +51,10 @@
 4. 运行爬虫程序
 
    ```shell
-   python main.py --platform xhs --lt qrcode
+   python main.py --run_at "09:00" --bot_url "http://127.0.0.1:8010" --db_inited
+   # or 
+   python main.py -r "09:00" -u "http://127.0.0.1:8010" -d
+
    ```
 
 5. 打开对应APP扫二维码登录

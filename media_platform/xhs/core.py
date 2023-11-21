@@ -18,6 +18,7 @@ from .client import XHSClient
 from .exception import DataFetchError
 from .login import XHSLogin
 
+XHS_URL = "https://www.xiaohongshu.com"
 
 class XiaoHongShuCrawler(AbstractCrawler):
     platform: str
@@ -28,7 +29,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
     browser_context: BrowserContext
 
     def __init__(self) -> None:
-        self.index_url = "https://www.xiaohongshu.com"
+        self.index_url = XHS_URL
         self.user_agent = utils.get_user_agent()
 
     def init_config(self, platform: str, login_type: str, account_pool: AccountPool) -> None:
@@ -36,7 +37,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
         self.login_type = login_type
         self.account_pool = account_pool
 
-    async def start(self) -> None:
+    async def start(self, keywords: list) -> list:
         account_phone, playwright_proxy, httpx_proxy = self.create_proxy_info()
         async with async_playwright() as playwright:
             # Launch a browser context.
@@ -73,15 +74,17 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 await self.xhs_client.update_cookies(browser_context=self.browser_context)
 
             # Search for notes and retrieve their comment information.
-            await self.search()
+            res = await self.search(keywords)
 
             utils.logger.info("Xhs Crawler finished ...")
+            return res
 
-    async def search(self) -> None:
+    async def search(self, keywords: list) -> list:
         """Search for notes and retrieve their comment information."""
         utils.logger.info("Begin search xiaohongshu keywords")
-        xhs_limit_count = 20  # xhs limit page fixed value
-        for keyword in config.KEYWORDS.split(","):
+        xhs_limit_count = 10  # xhs limit page fixed value
+        result = []
+        for keyword in keywords:
             # set keyword to context var
             request_keyword_var.set(keyword)
             utils.logger.info(f"Current search keyword: {keyword}")
@@ -101,11 +104,13 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 note_details = await asyncio.gather(*task_list)
                 for note_detail in note_details:
                     if note_detail is not None:
-                        await xhs_model.update_xhs_note(note_detail)
+                        item = await xhs_model.update_xhs_note(note_detail, keyword)
                         note_id_list.append(note_detail.get("note_id"))
+                        result.append(item)
                 page += 1
-                utils.logger.info(f"Note details: {note_details}")
-                await self.batch_get_note_comments(note_id_list)
+                # utils.logger.info(f"Note details: {note_details}")
+                # await self.batch_get_note_comments(note_id_list)
+        return result
 
     async def get_note_detail(self, note_id: str, semaphore: asyncio.Semaphore) -> Optional[Dict]:
         """Get note detail"""
@@ -158,8 +163,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
             headers={
                 "User-Agent": self.user_agent,
                 "Cookie": cookie_str,
-                "Origin": "https://www.xiaohongshu.com",
-                "Referer": "https://www.xiaohongshu.com",
+                "Origin": XHS_URL,
+                "Referer": XHS_URL,
                 "Content-Type": "application/json;charset=UTF-8"
             },
             playwright_page=self.context_page,
